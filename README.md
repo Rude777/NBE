@@ -4,7 +4,7 @@ This repository contains the Python script used in the current analytical workfl
 
 ## Files
 
-- `run.py`: main script
+- `main.py`: main script
 - `requirements.txt`: Python package requirements
 
 ## Environment
@@ -22,10 +22,10 @@ pip install -r requirements.txt
 Execute:
 
 ```bash
-python run.py
+python main.py
 ```
 
 ## Notes
 
-- The current script uses data embedded in `run.py`; no external input data files are required for execution.
+- The current script uses data embedded in `main.py`; no external input data files are required for execution.
 - The plotting style requests the `Arial` font. If `Arial` is unavailable on another machine, Matplotlib may substitute a different font.
