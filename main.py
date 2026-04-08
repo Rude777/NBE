@@ -4,11 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import norm
 from sklearn.mixture import GaussianMixture
-from sklearn.metrics import balanced_accuracy_score
 import matplotlib.patheffects as pe
-import warnings
-
-warnings.filterwarnings('ignore')
 
 # =============================================================================
 # 1. Global style
@@ -62,8 +58,13 @@ def fancy_text(ax, x, y, s, **kwargs):
     ])
     return txt
 
-def format_axis(ax):
-    pass
+def add_panel_label(ax, label, y, fontsize=11.5):
+    ax.text(
+        0.5, y, f'({label})',
+        transform=ax.transAxes,
+        ha='center', va='top',
+        fontsize=fontsize, fontweight='bold'
+    )
 
 # =============================================================================
 # 2. Data loading
@@ -75,6 +76,18 @@ def zscore_normalize(values, neg_reference):
     if sigma < 1e-9:
         sigma = 1.0
     return (values - mu) / sigma, mu, sigma
+
+def safe_balanced_accuracy(y_true, y_pred):
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    labels = np.unique(y_true)
+    if len(labels) == 0:
+        return np.nan
+    recalls = [
+        np.mean(y_pred[y_true == label] == label)
+        for label in labels
+    ]
+    return float(np.mean(recalls))
 
 def sample_truncated_normal(rng, loc, scale, low, high, size):
     out = np.empty(size, dtype=float)
@@ -288,19 +301,6 @@ def _proto_mean(df, label, fallback):
     return vals.mean() if len(vals) > 0 else fallback
 
 
-def _band_spread_offsets(n):
-    if n <= 0:
-        return np.array([], dtype=float)
-    offsets = [0.0]
-    step = 1
-    while len(offsets) < n:
-        offsets.append(+step)
-        if len(offsets) < n:
-            offsets.append(-step)
-        step += 1
-    return np.asarray(offsets[:n], dtype=float)
-
-
 def _local_band_offsets(z_vals, collision_threshold=0.55):
     z_vals = np.asarray(z_vals, dtype=float)
     n = len(z_vals)
@@ -318,7 +318,14 @@ def _local_band_offsets(z_vals, collision_threshold=0.55):
             end += 1
         cluster_size = end - start
         if cluster_size > 1:
-            offsets_sorted[start:end] = _band_spread_offsets(cluster_size)
+            spread = [0.0]
+            step = 1
+            while len(spread) < cluster_size:
+                spread.append(float(step))
+                if len(spread) < cluster_size:
+                    spread.append(float(-step))
+                step += 1
+            offsets_sorted[start:end] = np.asarray(spread[:cluster_size], dtype=float)
         start = end
 
     offsets = np.zeros(n, dtype=float)
@@ -388,8 +395,6 @@ def plot_fig_j_hbv(output='Fig5J_HBV_Macaron.png'):
     ax.legend(frameon=True, fontsize=8, loc='upper right',
               bbox_to_anchor=(0.98, 0.92), markerscale=0.8,
               facecolor='white', edgecolor='#DDDDDD', framealpha=0.95)
-    format_axis(ax)
-
     fig.savefig(output, dpi=600)
 
 def plot_fig_k_covid(output='Fig5K_COVID_Macaron.png'):
@@ -435,7 +440,6 @@ def plot_fig_k_covid(output='Fig5K_COVID_Macaron.png'):
     ax.legend(handles=legend_elements, fontsize=8, loc='lower right',
               bbox_to_anchor=(0.98, 0.05), frameon=True,
               facecolor='white', edgecolor='#DDDDDD', framealpha=0.95)
-    format_axis(ax)
     fig.savefig(output, dpi=600)
 
 def plot_fig_o_stacked(output='Fig5O_Stacked_Macaron.png'):
@@ -524,7 +528,6 @@ def plot_fig_o_stacked(output='Fig5O_Stacked_Macaron.png'):
     ax.legend(handles, labels, frameon=True, fontsize=8, loc='upper right',
               bbox_to_anchor=(0.98, 0.94), facecolor='white', edgecolor='#DDDDDD',
               framealpha=0.95)
-    format_axis(ax)
     fig.savefig(output, dpi=600)
 
 def plot_fig_m_bic(output='Fig5M_BIC_Macaron.png'):
@@ -620,7 +623,6 @@ def plot_fig_m_bic(output='Fig5M_BIC_Macaron.png'):
                                alpha=0.95, zorder=0))
     bic_text.set_zorder(3)
     leg.set_zorder(3)
-    format_axis(ax)
     fig.savefig(output, dpi=600)
 
 # =============================================================================
@@ -827,7 +829,7 @@ def subject_cumulative_prequential_curve(df, label_col, group_col='subject_id', 
             if len(idx):
                 idx = idx[0]
                 if len(np.unique(all_true)) == 2:
-                    bacc_mat[s, idx] = balanced_accuracy_score(all_true, all_pred)
+                    bacc_mat[s, idx] = safe_balanced_accuracy(all_true, all_pred)
                 elif not require_both_classes:
                     bacc_mat[s, idx] = np.mean(np.asarray(all_true) == np.asarray(all_pred))
                 cutdev_mat[s, idx] = abs(cutoff_now - cutoff_final)
@@ -912,14 +914,14 @@ def subject_cumulative_hierarchical_curve(df, group_col='subject_id', n_shuffles
             if len(idx):
                 idx = idx[0]
                 if len(np.unique(all_true_binary)) == 2:
-                    binary_bacc_mat[s, idx] = balanced_accuracy_score(all_true_binary, all_pred_binary)
+                    binary_bacc_mat[s, idx] = safe_balanced_accuracy(all_true_binary, all_pred_binary)
                 elif fallback_to_accuracy:
                     binary_bacc_mat[s, idx] = np.mean(
                         np.asarray(all_true_binary) == np.asarray(all_pred_binary)
                     )
 
                 if len(np.unique(all_true_ternary)) >= 2:
-                    ternary_bacc_mat[s, idx] = balanced_accuracy_score(all_true_ternary, all_pred_ternary)
+                    ternary_bacc_mat[s, idx] = safe_balanced_accuracy(all_true_ternary, all_pred_ternary)
                 elif fallback_to_accuracy:
                     ternary_bacc_mat[s, idx] = np.mean(
                         np.asarray(all_true_ternary) == np.asarray(all_pred_ternary)
@@ -976,13 +978,16 @@ def bootstrap_mean_ci(curves, n_boot=800, alpha=0.05, seed=DEFAULT_SEED):
     hi = np.nanpercentile(boot, 100 * (1.0 - alpha / 2.0), axis=0)
     return lo, hi
 
-def plot_curve_only_panel(ax, x, curve, title, color, warm_start_subjects=None,
-                          y_floor=0.45, y_pad=0.018, y_label='Balanced accuracy',
-                          line_label=None, y_limits=None,
-                          warm_fill_color=None, warm_fill_alpha=0.85,
-                          ci_label=None, ci_color=None, ci_alpha=0.20):
+def plot_curve_only_panel(ax, x, curve, title, color, y_limits,
+                          ci_label, ci_color, warm_start_subjects,
+                          y_label='Balanced accuracy'):
+    warm_fill_color = '#EFE9E2'
+    warm_fill_alpha = 0.95
+    ci_alpha = 0.35
+    y_floor = 0.10
+    y_pad = 0.02
     curve = np.asarray(curve, dtype=float)
-    fancy_line(ax, x, curve, color=color, lw=2.5, label=line_label)
+    fancy_line(ax, x, curve, color=color, lw=2.5)
     ax.scatter(x, curve, s=30, facecolor='white', edgecolor=color, lw=1.2, zorder=4)
 
     if warm_start_subjects is not None:
@@ -1017,27 +1022,18 @@ def plot_curve_only_panel(ax, x, curve, title, color, warm_start_subjects=None,
     ax.set_ylabel(y_label, fontweight='bold')
     ax.set_title(title, fontweight='bold', fontsize=11)
     
-    if ci_label is not None:
-        from matplotlib.lines import Line2D
-        from matplotlib.patches import Patch
-        
-        c_label = y_label if line_label is None else line_label
-        legend_elements = [
-            Line2D([0], [0], color=color, lw=2.5, label=c_label)
-        ]
-        if ci_color is not None:
-            legend_elements.append(Patch(facecolor=ci_color, alpha=ci_alpha, edgecolor='none', label=ci_label))
-            
-        ax.legend(handles=legend_elements, frameon=True, fontsize=7.5, loc='lower right',
-                  facecolor='white', edgecolor='#DDDDDD', framealpha=0.95)
-    elif line_label is not None:
-        ax.legend(frameon=True, fontsize=7.5, loc='lower right',
-                  facecolor='white', edgecolor='#DDDDDD', framealpha=0.95)
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Line2D([0], [0], color=color, lw=2.5, label=y_label),
+        Patch(facecolor=ci_color, alpha=ci_alpha, edgecolor='none', label=ci_label)
+    ]
+    ax.legend(handles=legend_elements, frameon=True, fontsize=7.5, loc='lower right',
+              facecolor='white', edgecolor='#DDDDDD', framealpha=0.95)
 
-    format_axis(ax)
-
-def plot_stability_panel(ax, x, mat, title, line_color, fill_color, label_text,
-                         ci_label='95% CI (800 bootstraps)', ci_alpha=0.3):
+def plot_stability_panel(ax, x, mat, title, line_color, fill_color, label_text):
+    ci_label = '95% CI (800 bootstraps)'
+    ci_alpha = 0.30
     m = np.nanmedian(mat, axis=0)
     
     lo, hi = bootstrap_median_ci(mat, n_boot=800, alpha=0.05, seed=DEFAULT_SEED)
@@ -1060,31 +1056,15 @@ def plot_stability_panel(ax, x, mat, title, line_color, fill_color, label_text,
     ax.set_xlabel('Cumulative labeled subjects', fontweight='bold')
     ax.set_ylabel('Absolute deviation in z-space', fontweight='bold')
     ax.set_title(title, fontweight='bold', fontsize=10.5)
-    format_axis(ax)
-
-def plot_covid_sample_size_model_evolution(output='Suppl_COVID_SampleSize_ModelEvolution.png',
-                                           sample_sizes=(10, 19, 30, 40),
-                                           display_sample_sizes=(10, 20, 30, 40),
-                                           order_strategy='class_balanced',
-                                           split_feature=COVID_TERNARY_SPLIT_FEATURE,
-                                           min_component_samples=3,
-                                           top_row_label_y=-0.14,
-                                           bottom_row_label_y=-0.22):
+def plot_covid_sample_size_model_evolution(output='Suppl_COVID_SampleSize_ModelEvolution.png'):
     from matplotlib.patches import Patch
     import math
-
-    def add_panel_label_local(ax, label, y, fontsize=11.5):
-        ax.text(
-            0.5, y, f'({label})',
-            transform=ax.transAxes,
-            fontsize=fontsize,
-            fontweight='bold',
-            va='top',
-            ha='center'
-        )
-
-    if len(sample_sizes) != len(display_sample_sizes):
-        raise ValueError('sample_sizes and display_sample_sizes must have the same length')
+    sample_sizes = (10, 20, 30, 40)
+    order_strategy = 'class_balanced'
+    split_feature = COVID_TERNARY_SPLIT_FEATURE
+    min_component_samples = 3
+    top_row_label_y = -0.14
+    bottom_row_label_y = -0.22
 
     df = load_covid_data(
         ternary_split_feature=split_feature,
@@ -1123,7 +1103,7 @@ def plot_covid_sample_size_model_evolution(output='Suppl_COVID_SampleSize_ModelE
         2: ('D', COLORS['pos'], COLORS['pos_edge']),
     }
 
-    for i, (n, display_n) in enumerate(zip(sample_sizes, display_sample_sizes)):
+    for i, n in enumerate(sample_sizes):
         ax = axes[i]
         panel_df = df[df['subject_id'].isin(ordered[:n])].copy()
         panel_df = assign_covid_ternary_labels(
@@ -1234,7 +1214,7 @@ def plot_covid_sample_size_model_evolution(output='Suppl_COVID_SampleSize_ModelE
             ax.scatter(vals, y, s=22, facecolor=fill, edgecolor='white', marker=marker, lw=0.9, zorder=5)
             ax.scatter(vals, y, s=22, facecolor='none', edgecolor=edge, marker=marker, lw=0.8, zorder=6)
 
-        ax.set_title(f'{display_n} subjects', fontweight='bold', fontsize=10.5, pad=5)
+        ax.set_title(f'{n} subjects', fontweight='bold', fontsize=10.5, pad=5)
         ax.set_xlim(z_min, z_max)
         ax.set_ylim(0.0, 1.0)
 
@@ -1245,9 +1225,7 @@ def plot_covid_sample_size_model_evolution(output='Suppl_COVID_SampleSize_ModelE
             ax.set_ylabel('Class probability', fontweight='bold')
 
         label_y = top_row_label_y if row_idx == 0 else bottom_row_label_y
-        add_panel_label_local(ax, panel_labels[i], y=label_y, fontsize=11.5)
-        format_axis(ax)
-
+        add_panel_label(ax, panel_labels[i], y=label_y, fontsize=11.5)
     for j in range(n_panels, len(axes)):
         axes[j].set_visible(False)
 
@@ -1285,24 +1263,14 @@ def plot_covid_sample_size_model_evolution(output='Suppl_COVID_SampleSize_ModelE
 
 def plot_suppl_learning_stability_combined(
         output='Suppl_Sy_HBV_COVID_LearningCurve_Stability.png',
-        n_shuffles=DEFAULT_N_SHUFFLES,
-        covid_order_strategy='class_balanced',
-        covid_display_window=3,
-        covid_y_floor=0.10,
-        covid_min_train_subjects=10,
-        hbv_min_train_subjects=4,
-        hbv_y_limits=(0.70, 0.892),
-        covid_y_limits=(0.37, 0.77),
-        convergence_covid_min_subjects=10):
-    def add_bottom_panel_label(ax, label, y):
-        ax.text(
-            0.5, y, f'({label})',
-            transform=ax.transAxes,
-            ha='center', va='top',
-            fontsize=11.5, fontweight='bold'
-        )
-
-    warm_fill = '#EFE9E2'
+        n_shuffles=DEFAULT_N_SHUFFLES):
+    covid_order_strategy = 'class_balanced'
+    covid_display_window = 3
+    covid_min_train_subjects = 10
+    hbv_min_train_subjects = 4
+    hbv_y_limits = (0.70, 0.892)
+    covid_y_limits = (0.37, 0.77)
+    convergence_covid_min_subjects = 10
 
     covid_learning_df = load_covid_data(
         ternary_split_feature='CLIA',
@@ -1336,8 +1304,10 @@ def plot_suppl_learning_stability_combined(
     show_mask = (covid_x_single > 11)
 
     hbv_x_conv, hbv_cpos_err_mat, _ = subject_stability_curve(
-        hbv_df, 'label', min_subjects=3, n_shuffles=n_shuffles
+        hbv_df, 'label', min_subjects=3, n_shuffles=n_shuffles,
+        order_strategy='class_balanced'
     )
+
     covid_x_conv, covid_cpos_err_mat, _ = subject_stability_curve(
         covid_df, 'label_binary', min_subjects=convergence_covid_min_subjects,
         n_shuffles=n_shuffles, order_strategy=covid_order_strategy
@@ -1352,13 +1322,12 @@ def plot_suppl_learning_stability_combined(
     plot_curve_only_panel(
         axes[0, 0], hbv_x, hbv_curve,
         'HBV balanced accuracy',
-        COLORS['pos_edge'], warm_start_subjects=hbv_min_train_subjects, y_floor=0.10,
-        y_pad=0.02, y_label='Balanced accuracy',
-        y_limits=hbv_y_limits,
-        warm_fill_color=warm_fill, warm_fill_alpha=0.95,
-        ci_label='95% CI (800 bootstraps)',
-        ci_color=COLORS['pos_fill'],
-        ci_alpha=0.35,
+        COLORS['pos_edge'],
+        hbv_y_limits,
+        '95% CI (800 bootstraps)',
+        COLORS['pos_fill'],
+        hbv_min_train_subjects,
+        y_label='Balanced accuracy',
     )
     axes[0, 0].set_xlabel('Cumulative labeled subjects', fontweight='bold')
 
@@ -1370,13 +1339,12 @@ def plot_suppl_learning_stability_combined(
     plot_curve_only_panel(
         axes[0, 1], covid_x_single[show_mask], covid_curve[show_mask],
         'COVID three-class balanced accuracy',
-        COLORS['weak_edge'], warm_start_subjects=covid_min_train_subjects + 1, y_floor=covid_y_floor,
-        y_pad=0.02, y_label='Balanced accuracy',
-        y_limits=covid_y_limits,
-        warm_fill_color=warm_fill, warm_fill_alpha=0.95,
-        ci_label='95% CI (800 bootstraps)',
-        ci_color=COLORS['weak'],
-        ci_alpha=0.35,
+        COLORS['weak_edge'],
+        covid_y_limits,
+        '95% CI (800 bootstraps)',
+        COLORS['weak'],
+        covid_min_train_subjects + 1,
+        y_label='Balanced accuracy',
     )
     axes[0, 1].set_xlim(covid_min_train_subjects + 1 - 0.1, covid_x_single.max() + 0.2)
     axes[0, 1].set_xlabel('Cumulative labeled subjects', fontweight='bold')
@@ -1401,10 +1369,10 @@ def plot_suppl_learning_stability_combined(
         'Median |C$_{pos,n}$ - C$_{pos,final}$|'
     )
 
-    add_bottom_panel_label(axes[0, 0], 'a', y=-0.14)
-    add_bottom_panel_label(axes[0, 1], 'b', y=-0.14)
-    add_bottom_panel_label(axes[1, 0], 'c', y=-0.14)
-    add_bottom_panel_label(axes[1, 1], 'd', y=-0.14)
+    add_panel_label(axes[0, 0], 'a', y=-0.14)
+    add_panel_label(axes[0, 1], 'b', y=-0.14)
+    add_panel_label(axes[1, 0], 'c', y=-0.14)
+    add_panel_label(axes[1, 1], 'd', y=-0.14)
 
     fig.subplots_adjust(
         left=0.08,
@@ -1415,10 +1383,6 @@ def plot_suppl_learning_stability_combined(
         hspace=0.30,
     )
     fig.savefig(output, dpi=600)
-
-# =============================================================================
-# 6. Main execution
-# =============================================================================
 
 if __name__ == '__main__':
     print('=' * 60)
